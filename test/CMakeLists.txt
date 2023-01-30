@@ -1,0 +1,2 @@
+add_executable(test_muduo test_muduo.cpp)
+target_link_libraries(test_muduo muduo_net muduo_base pthread)
