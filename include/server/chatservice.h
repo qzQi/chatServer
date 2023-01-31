@@ -13,6 +13,8 @@ ChatService编写为一个单例，仅仅为了使用成员函数处理业务，
 #include <functional>
 #include "json.hpp"
 
+#include "usermodel.hpp"
+
 using namespace std;
 using namespace muduo;
 using namespace muduo::net;
@@ -39,6 +41,9 @@ class ChatService {
   private:
     ChatService();                                 // 单例实现
     unordered_map<int, MsgHandler> _msgHandlerMap; // 由相应的msgId返回对应的回调
+
+    // 数据库表操作类对象,避免频繁创建
+    UserModel _userModel;
 };
 
 #endif

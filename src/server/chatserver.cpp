@@ -48,8 +48,9 @@ void ChatServer::onMessage(
 
     // 打开vscode的报错功能吧
     string bufStr = buff->retrieveAllAsString();
-    LOG_INFO << bufStr; // 测试代码
+    LOG_INFO << bufStr; // 测试代码 for debug
 
+    //这个json的parse可能需要处理一下异常，不能说不发生json直接down了？
     json js = json::parse(bufStr);
 
     // 解耦！！！
