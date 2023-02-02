@@ -15,6 +15,9 @@ public:
 
     // 设置用户在线状态
     bool updateState(User& user);
+
+    // 重置用户的状态信息
+    void resetState();
 };
 
 #endif

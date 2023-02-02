@@ -27,6 +27,12 @@ void ChatServer::start() {
 
 void ChatServer::onConnection(const TcpConnectionPtr &conn) {
     // 处理客户的TCP连接变化 1、建立（不用管） 2、客户断开连接
+    // 新增处理用户异常断开连接代码，但是如何判断用户是异常断开？
+    if(!conn->connected()){
+        ChatService* service=ChatService::instance();
+        // 不管是不是异常断开都会调用这段代码，可是这个代码并不高效！
+        service->clientCloseException(conn);
+    }
 }
 
 // 收到客户发来的消息，已连接套接字可读的回调
@@ -48,7 +54,7 @@ void ChatServer::onMessage(
 
     // 打开vscode的报错功能吧
     string bufStr = buff->retrieveAllAsString();
-    LOG_INFO << bufStr; // 测试代码 for debug
+    LOG_INFO << bufStr<<" in ChatServer::onMessage"; // 测试代码 for debug
 
     //这个json的parse可能需要处理一下异常，不能说不发生json直接down了？
     json js = json::parse(bufStr);

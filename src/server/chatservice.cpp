@@ -47,9 +47,16 @@ void ChatService::login(const TcpConnectionPtr &conn, json &js, Timestamp t) {
             resp["errmsg"] = "this account is using, input another!";
             conn->send(resp.dump());
         } else {
+            {
+                // 新增：记录用户登录连接
+                lock_guard<mutex> lk(_connMutex);
+                _userConnMap.insert({id, conn});
+                _userConnMapReverse.insert({conn, id}); // from O(n)-->O(1)
+            }
             // 登录成功，返回成功信息，并更新数据库状态online
             //  UserModel新增update功能
-            // loginUser.setState("onlien"); fix bug 状态只有lnline，单词拼写错了
+            // loginUser.setState("onlien"); fix bug
+            // 状态只有lnline，单词拼写错了
             loginUser.setState("online");
             _userModel.updateState(loginUser);
             json resp;
@@ -57,6 +64,15 @@ void ChatService::login(const TcpConnectionPtr &conn, json &js, Timestamp t) {
             resp["errno"] = 0; // 目前使用了0，1，2 errno
             resp["id"] = id;
             resp["name"] = loginUser.getName();
+
+            // 新增，用户登录时候检查是否有离线信息
+            vector<string> vec = _offlineMsgModel.query(id);
+            if (!vec.empty()) {
+                // 读取该用户的离线消息后，把该用户的所有离线消息删除掉
+                // js["offlinemsg"] = vec;
+                resp["offlinemsg"] = vec;
+                _offlineMsgModel.remove(id);
+            }
             conn->send(resp.dump());
         }
     } else {
@@ -112,4 +128,83 @@ ChatService::ChatService() {
 
     _msgHandlerMap.insert(
         {REG_MSG, std::bind(&ChatService::reg, this, _1, _2, _3)});
+
+    // 增加一对一聊天业务
+    _msgHandlerMap.insert(
+        {ONE_CHAT_MSG, std::bind(&ChatService::oneChat, this, _1, _2, _3)});
+
+    // 增加好友业务处理函数
+    _msgHandlerMap.insert(
+        {ADD_FRIEND_MSG, std::bind(&ChatService::addFriend, this, _1, _2, _3)});
+}
+
+// 处理用户异常退出，需要删除该用户在 在线用户map里面的信息
+// 业务细节，用户异常断开连接muduo库回调onConnection函数；此时仅能得知一个参数
+// 用户的就是TcpConnectionPtr
+void ChatService::clientCloseException(const TcpConnectionPtr &conn) {
+    User user;
+    {
+        lock_guard<mutex> lk(_connMutex);
+        // // 进行一次迭代，效率比较低；有没有办法直接从conn找到用户id？
+        // // 再创建一个map 由conn-》id ：空间换时间
+        // for(auto it=_userConnMap.begin();it!=_userConnMap.end();it++){
+        //     if(it->second==conn){
+        //         user.setId(it->first);
+        //         _userConnMap.erase(it);
+        //         // return;
+        //         break;
+        //     }
+        // }
+        // int id=_userConnMapReverse
+        if (_userConnMapReverse.count(conn) == 0) { return; }
+        int id = _userConnMapReverse[conn];
+        user.setId(id);
+        _userConnMap.erase(id);
+        _userConnMapReverse.erase(conn);
+        // _userConnMap.erase(_userConnMap.begin());可以传入一个迭代器
+    }
+    // 如果的到该用户的在线信息，更新数据库状态
+    if (user.getId() != -1) {
+        user.setState("offline");
+        _userModel.updateState(user); // 更新数据库信息为offline
+    }
+}
+
+// 一对一聊天服务业务
+void ChatService::oneChat(const TcpConnectionPtr &conn, json &js, Timestamp t) {
+    // 由用户发来的json信息，由msgid=ONE_CHAT_MSG获取该处理函数
+    // 定义用户之间通信的json格式，
+    // {"msgid":ONE_CHAT_MSG,"id":senderID,"name":senderName,"toid":reveiverID,"msg":"xxx"}
+    LOG_INFO << "one chat service";
+    // 只要知道对方的id就可以通信
+    int toid = js["toid"].get<int>();
+    // 如果用户在线，直接发送；不然存入offlinemessage表
+    {
+        lock_guard<mutex> lk(_connMutex);
+        auto it = _userConnMap.find(toid);
+        if (it != _userConnMap.end()) {
+            // 用户在线，直接转发信息
+            it->second->send(js.dump());
+            return;
+        }
+    }
+    // 用户不在线，转存信息为offlinemessage；开发offlinemessageModel
+    // 这是单机版的实现，一个服务器集群如何获取其他主机上的信息呢？
+    _offlineMsgModel.insert(toid, js.dump());
+}
+
+// 服务器异常，业务重置方法，每次服务器CTRL+C退出不用手动更新数据库；
+// 以后增加其他信号处理函数
+void ChatService::reset() {
+    _userModel.resetState();
+}
+
+// 添加好友业务，
+void ChatService::addFriend(
+    const TcpConnectionPtr &conn, json &js, Timestamp t) {
+    int userid = js["id"].get<int>();
+    int friendid = js["friendid"].get<int>();
+
+    // 存储好友信息
+    _friendModel.insert(userid, friendid);
 }
