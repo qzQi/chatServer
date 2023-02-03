@@ -11,6 +11,11 @@ enum EnMsgType {
     REG_MSG_ACK,    // 对注册消息的回应
     ONE_CHAT_MSG,   // 一对一聊天业务
     ADD_FRIEND_MSG, // 添加好友消息
+
+    // 组群业务实现的msgid
+    CREATE_GROUP_MSG, // 创建群组
+    ADD_GROUP_MSG,    // 加入群组
+    GROUP_CHAT_MSG,   // 群聊天
 };
 
 // 各个业务数据格式

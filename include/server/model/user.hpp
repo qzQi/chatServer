@@ -29,7 +29,7 @@ class User {
     string getPwd() { return this->password; }
     string getState() { return this->state; }
 
-  private:
+  protected:
     int id;
     string name;
     string password;

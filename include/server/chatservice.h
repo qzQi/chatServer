@@ -17,6 +17,7 @@ ChatService编写为一个单例，仅仅为了使用成员函数处理业务，
 #include "usermodel.hpp"
 #include "offlinemessagemodel.hpp"
 #include "friendModel.hpp"
+#include "groupmodel.hpp"
 
 using namespace std;
 using namespace muduo;
@@ -45,8 +46,16 @@ class ChatService {
     void oneChat(const TcpConnectionPtr &conn, json &js, Timestamp t);
 
     // 添加好友业务
-    void addFriend(const TcpConnectionPtr& conn,json& js,Timestamp t);
+    void addFriend(const TcpConnectionPtr &conn, json &js, Timestamp t);
 
+    // 创建群组
+    void createGroup(const TcpConnectionPtr &conn, json &js, Timestamp t);
+
+    // 加入群组
+    void addGroup(const TcpConnectionPtr &conn, json &js, Timestamp t);
+
+    // 群聊业务
+    void groupChat(const TcpConnectionPtr &conn, json &js, Timestamp t);
     // 处理用户异常退出，需要删除该用户在在线用户map里面的信息
     void clientCloseException(const TcpConnectionPtr &);
 
@@ -63,6 +72,7 @@ class ChatService {
     UserModel _userModel;
     OfflineMsgModel _offlineMsgModel;
     FriendModel _friendModel;
+    GroupModel _groupModel;
 
     // 存储在线用户的id及其tcp连接，实现在线用户之间的通信！C/S模型
     // 用户登陆时需要加入map，用户下线（主动/异常）时删除map记录

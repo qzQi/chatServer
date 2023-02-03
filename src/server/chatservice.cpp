@@ -73,6 +73,22 @@ void ChatService::login(const TcpConnectionPtr &conn, json &js, Timestamp t) {
                 resp["offlinemsg"] = vec;
                 _offlineMsgModel.remove(id);
             }
+
+            // 新增，返回用户的好友信息；也是一次查询数据库
+            vector<User> vecUser = _friendModel.query(id);
+            if (!vecUser.empty()) {
+                // 如何读取vector user
+                // js["frinends"]=vecUser;//?User是自定义的，无法解析
+                vector<string> vecUserStr;
+                for (auto &u : vecUser) {
+                    json strUser;
+                    strUser["id"] = u.getId();
+                    strUser["name"] = u.getName();
+                    strUser["state"] = u.getState();
+                    vecUserStr.push_back(strUser.dump());
+                }
+                resp["friends"] = vecUserStr; // 标准库可以直接放入json
+            }
             conn->send(resp.dump());
         }
     } else {
@@ -136,6 +152,17 @@ ChatService::ChatService() {
     // 增加好友业务处理函数
     _msgHandlerMap.insert(
         {ADD_FRIEND_MSG, std::bind(&ChatService::addFriend, this, _1, _2, _3)});
+
+    _msgHandlerMap.insert(
+        {ADD_GROUP_MSG, std::bind(&ChatService::addGroup, this, _1, _2, _3)});
+    
+    _msgHandlerMap.insert(
+        {ADD_GROUP_MSG,std::bind(&ChatService::addGroup,this,_1,_2,_3)}
+    );
+
+    _msgHandlerMap.insert(
+        {ADD_GROUP_MSG,std::bind(&ChatService::groupChat,this,_1,_2,_3)}
+    );
 }
 
 // 处理用户异常退出，需要删除该用户在 在线用户map里面的信息
@@ -207,4 +234,52 @@ void ChatService::addFriend(
 
     // 存储好友信息
     _friendModel.insert(userid, friendid);
+}
+
+// 创建群组
+void ChatService::createGroup(
+    const TcpConnectionPtr &conn, json &js, Timestamp t) {
+    // 业务细节：用户创建组群，从js里面获取相应的信息
+    // 信息格式：
+    int userid=js["id"].get<int>();
+    string groupName=js["groupname"];
+    string groupDesc=js["groupdesc"];
+
+    // allgroup表的orm对象&&操作
+    Group group(-1,groupName,groupDesc);
+    if(_groupModel.createGroup(group)){
+        // 存储创建用户为creator
+        _groupModel.addGroup(userid,group.getId(),"creator");
+    }
+}
+
+// 加入群组
+void ChatService::addGroup(
+    const TcpConnectionPtr &conn, json &js, Timestamp t) {
+    // 业务细节：获取userid&&groupid，然后操作orm&&model
+    int userid = js["id"].get<int>();
+    int groupid = js["groupid"].get<int>();
+    _groupModel.addGroup(userid, groupid, "normal");
+}
+
+// 群聊业务,群发信息：对方在线？直接发送，不在线存储离线
+void ChatService::groupChat(
+    const TcpConnectionPtr &conn, json &js, Timestamp t) {
+    // 实现：从数据库获取user所要发送组群的所有用户id
+    int userid=js["id"];
+    int groupid=js["groupid"];
+    vector<int> uidVec=_groupModel.queryGroupUsers(userid,groupid);
+
+    lock_guard<mutex> lk(_connMutex);
+    for(int id:uidVec){
+        auto it=_userConnMap.find(id);
+        if(it!=_userConnMap.end()){
+            // 如果组员在线直接发送，消息
+            it->second->send(js.dump());
+        }else{
+            // 单机版本的实现，如果服务集群如何处理？
+            // 若用户在其他服务器在线？
+            _offlineMsgModel.insert(id,js.dump());
+        }
+    }
 }
