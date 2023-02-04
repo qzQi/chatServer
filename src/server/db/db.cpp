@@ -7,7 +7,7 @@ using namespace muduo;
 
 // 数据库配置信息，不想写从配置文件读取了，直接使用static 变量
 // 别忘记修改了
-static string ServerIP = "101.42.23.45";
+static string ServerIP = "127.0.0.1";
 static string user = "qzyDB";
 static string password = "helloQzy";
 static string dbname = "chat";
@@ -43,7 +43,7 @@ bool MySQL::update(string sql) {
         LOG_INFO<<__FILE__<<":"<<__LINE__<<":"
             <<sql<<"更新失败";
         // 如何获取更新失败的原因？
-        LOG_INFO<<mysql_errno(_conn)<<mysql_error(_conn);
+        LOG_INFO<<"更新失败原因"<<mysql_errno(_conn)<<mysql_error(_conn);
         return false;
     }
     return true;
@@ -54,6 +54,7 @@ MYSQL_RES *MySQL::query(string sql) {
     if(mysql_query(_conn,sql.c_str())){
         LOG_INFO<<__FILE__<<":"<<__LINE__<<":"
             <<sql<<"查询失败";
+        LOG_INFO<<"查询失败原因"<<mysql_errno(_conn)<<mysql_error(_conn);
         return nullptr;
     }
     return mysql_use_result(_conn);

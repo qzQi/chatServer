@@ -89,6 +89,33 @@ void ChatService::login(const TcpConnectionPtr &conn, json &js, Timestamp t) {
                 }
                 resp["friends"] = vecUserStr; // 标准库可以直接放入json
             }
+
+            // 供客户端登录时候显示的信息：用户组群信息
+            vector<Group> groupuserVec = _groupModel.queryGroups(id);
+            if (!groupuserVec.empty()) {
+                // 每个组的id，name，desc，所有用户
+                // group:[{groupid:[xxx, xxx, xxx, xxx]}]
+                vector<string> groupV;
+                for (Group &group : groupuserVec) {
+                    json grpjson;
+                    grpjson["id"] = group.getId();
+                    grpjson["groupname"] = group.getName();
+                    grpjson["groupdesc"] = group.getDesc();
+                    vector<string> userV;
+                    for (GroupUser &user : group.getUsers()) {
+                        json js;
+                        js["id"] = user.getId();
+                        js["name"] = user.getName();
+                        js["state"] = user.getState();
+                        js["role"] = user.getRole();
+                        userV.push_back(js.dump());
+                    }
+                    grpjson["users"] = userV;
+                    groupV.push_back(grpjson.dump());
+                }
+
+                resp["groups"] = groupV;
+            }
             conn->send(resp.dump());
         }
     } else {
@@ -145,6 +172,9 @@ ChatService::ChatService() {
     _msgHandlerMap.insert(
         {REG_MSG, std::bind(&ChatService::reg, this, _1, _2, _3)});
 
+    _msgHandlerMap.insert(
+        {LOGINOUT_MSG, std::bind(&ChatService::loginout, this, _1, _2, _3)});
+
     // 增加一对一聊天业务
     _msgHandlerMap.insert(
         {ONE_CHAT_MSG, std::bind(&ChatService::oneChat, this, _1, _2, _3)});
@@ -153,16 +183,16 @@ ChatService::ChatService() {
     _msgHandlerMap.insert(
         {ADD_FRIEND_MSG, std::bind(&ChatService::addFriend, this, _1, _2, _3)});
 
+    // 组群业务相关事件处理回调注册
     _msgHandlerMap.insert(
-        {ADD_GROUP_MSG, std::bind(&ChatService::addGroup, this, _1, _2, _3)});
-    
-    _msgHandlerMap.insert(
-        {ADD_GROUP_MSG,std::bind(&ChatService::addGroup,this,_1,_2,_3)}
-    );
+        {CREATE_GROUP_MSG,
+         std::bind(&ChatService::createGroup, this, _1, _2, _3)});
 
     _msgHandlerMap.insert(
-        {ADD_GROUP_MSG,std::bind(&ChatService::groupChat,this,_1,_2,_3)}
-    );
+        {ADD_GROUP_MSG, std::bind(&ChatService::addGroup, this, _1, _2, _3)});
+
+    _msgHandlerMap.insert(
+        {GROUP_CHAT_MSG, std::bind(&ChatService::groupChat, this, _1, _2, _3)});
 }
 
 // 处理用户异常退出，需要删除该用户在 在线用户map里面的信息
@@ -241,15 +271,15 @@ void ChatService::createGroup(
     const TcpConnectionPtr &conn, json &js, Timestamp t) {
     // 业务细节：用户创建组群，从js里面获取相应的信息
     // 信息格式：
-    int userid=js["id"].get<int>();
-    string groupName=js["groupname"];
-    string groupDesc=js["groupdesc"];
+    int userid = js["id"].get<int>();
+    string groupName = js["groupname"];
+    string groupDesc = js["groupdesc"];
 
     // allgroup表的orm对象&&操作
-    Group group(-1,groupName,groupDesc);
-    if(_groupModel.createGroup(group)){
+    Group group(-1, groupName, groupDesc);
+    if (_groupModel.createGroup(group)) {
         // 存储创建用户为creator
-        _groupModel.addGroup(userid,group.getId(),"creator");
+        _groupModel.addGroup(userid, group.getId(), "creator");
     }
 }
 
@@ -266,20 +296,46 @@ void ChatService::addGroup(
 void ChatService::groupChat(
     const TcpConnectionPtr &conn, json &js, Timestamp t) {
     // 实现：从数据库获取user所要发送组群的所有用户id
-    int userid=js["id"];
-    int groupid=js["groupid"];
-    vector<int> uidVec=_groupModel.queryGroupUsers(userid,groupid);
+    int userid = js["id"];
+    int groupid = js["groupid"];
+    vector<int> uidVec = _groupModel.queryGroupUsers(userid, groupid);
 
     lock_guard<mutex> lk(_connMutex);
-    for(int id:uidVec){
-        auto it=_userConnMap.find(id);
-        if(it!=_userConnMap.end()){
+    for (int id : uidVec) {
+        auto it = _userConnMap.find(id);
+        if (it != _userConnMap.end()) {
             // 如果组员在线直接发送，消息
             it->second->send(js.dump());
-        }else{
+        } else {
             // 单机版本的实现，如果服务集群如何处理？
             // 若用户在其他服务器在线？
-            _offlineMsgModel.insert(id,js.dump());
+            _offlineMsgModel.insert(id, js.dump());
         }
     }
+}
+
+// 处理用户注销业务
+void ChatService::loginout(
+    const TcpConnectionPtr &conn, json &js, Timestamp time) {
+int userid = js["id"].get<int>();
+
+    {
+        lock_guard<mutex> lock(_connMutex);
+        auto it = _userConnMap.find(userid);
+        if (it != _userConnMap.end())
+        {
+            _userConnMap.erase(it);
+        }
+        auto itcon=_userConnMapReverse.find(conn);
+        if(itcon!=_userConnMapReverse.end()){
+            _userConnMapReverse.erase(itcon);
+        }
+    }
+
+    // // 用户注销，相当于就是下线，在redis中取消订阅通道
+    // _redis.unsubscribe(userid); 
+
+    // 更新用户的状态信息
+    User user(userid, "", "", "offline");
+    _userModel.updateState(user);
 }

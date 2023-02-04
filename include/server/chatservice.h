@@ -39,6 +39,9 @@ class ChatService {
     // 处理登录业务
     void login(const TcpConnectionPtr &conn, json &js, Timestamp t);
 
+    // 处理用户注销业务
+    void loginout(const TcpConnectionPtr &conn, json &js, Timestamp time);
+
     // 处理注册业务
     void reg(const TcpConnectionPtr &conn, json &js, Timestamp t);
 

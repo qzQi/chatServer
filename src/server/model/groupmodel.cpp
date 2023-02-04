@@ -63,7 +63,7 @@ vector<Group> GroupModel::queryGroups(int userid) {
         }
     }
 
-    // 查询群组的用户信息
+    // 查询群组的用户信息，直接使用联合查询
     for (Group &group : groupVec) {
         sprintf(
             sql, "select a.id,a.name,a.state,b.grouprole from user a \

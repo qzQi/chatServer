@@ -5,9 +5,10 @@
 
 // 从收到的数据的msgid字段获取消息类型，为不同的类型编写不同的业务逻辑
 enum EnMsgType {
-    LOGIN_MSG = 1,  // 登录消息
-    LOGIN_MSG_ACK,  // 登录消息的回复
-    REG_MSG,        // 注册消息
+    LOGIN_MSG = 1, // 登录消息
+    LOGIN_MSG_ACK, // 登录消息的回复
+    LOGINOUT_MSG, // 注销消息，注销不是注销账号，而是退出/下线
+    REG_MSG,      // 注册消息
     REG_MSG_ACK,    // 对注册消息的回应
     ONE_CHAT_MSG,   // 一对一聊天业务
     ADD_FRIEND_MSG, // 添加好友消息
