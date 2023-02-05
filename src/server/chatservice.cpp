@@ -198,6 +198,7 @@ ChatService::ChatService() {
     _msgHandlerMap.insert(
         {GROUP_CHAT_MSG, std::bind(&ChatService::groupChat, this, _1, _2, _3)});
 
+    // fix bug:connect()返回值未定义！！！
     if (_redis.connect()) {
         // 连接redis服务器，并进行对订阅消息处理函数的注册
         // 绑定函数别忘了取地址！！！
@@ -247,7 +248,7 @@ void ChatService::oneChat(const TcpConnectionPtr &conn, json &js, Timestamp t) {
     // 由用户发来的json信息，由msgid=ONE_CHAT_MSG获取该处理函数
     // 定义用户之间通信的json格式，
     // {"msgid":ONE_CHAT_MSG,"id":senderID,"name":senderName,"toid":reveiverID,"msg":"xxx"}
-    LOG_INFO << "one chat service";
+    LOG_INFO << "one chat service";//debug
     // 只要知道对方的id就可以通信
     // 单机下所有客户在同一台服务器，集群下需要再查数据库
     int toid = js["toid"].get<int>();
@@ -266,7 +267,9 @@ void ChatService::oneChat(const TcpConnectionPtr &conn, json &js, Timestamp t) {
     // 先查询该用户在不在别的服务器上
     User user=_userModel.query(toid);
     if(user.getState()=="online"){
+        // bug1：进行oneChat业务时，跨服务器通信，导致对方down了，自己没事
         _redis.publish(toid,js.dump());
+        return ;
     }
 
     // 用户不在线，转存信息为offlinemessage；开发offlinemessageModel

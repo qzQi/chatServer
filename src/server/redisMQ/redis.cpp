@@ -28,6 +28,10 @@ bool Redis::connect() {
     // 并转发给message handler处理函数
     thread receiver([this]() { this->receive_channel_message(); });
     receiver.detach();
+
+    // debug：忘记写返回值，导致产生未定义的行为！ 进而影响在service里面的注册回调
+    cout<<"redis connect success !";
+    return true;
 }
 
 // 向redis指定的通道subscribe订阅消息,redis-cli是阻塞在接受channel信息上面
