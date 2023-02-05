@@ -53,6 +53,10 @@ void ChatService::login(const TcpConnectionPtr &conn, json &js, Timestamp t) {
                 _userConnMap.insert({id, conn});
                 _userConnMapReverse.insert({conn, id}); // from O(n)-->O(1)
             }
+
+            // 
+            _redis.subscribe(id);
+
             // 登录成功，返回成功信息，并更新数据库状态online
             //  UserModel新增update功能
             // loginUser.setState("onlien"); fix bug
@@ -193,6 +197,13 @@ ChatService::ChatService() {
 
     _msgHandlerMap.insert(
         {GROUP_CHAT_MSG, std::bind(&ChatService::groupChat, this, _1, _2, _3)});
+
+    if (_redis.connect()) {
+        // 连接redis服务器，并进行对订阅消息处理函数的注册
+        // 绑定函数别忘了取地址！！！
+        _redis.init_notify_message_handler(
+            std::bind(&ChatService::handleRedisSubscribeMessage, this, _1, _2));
+    }
 }
 
 // 处理用户异常退出，需要删除该用户在 在线用户map里面的信息
@@ -220,6 +231,10 @@ void ChatService::clientCloseException(const TcpConnectionPtr &conn) {
         _userConnMapReverse.erase(conn);
         // _userConnMap.erase(_userConnMap.begin());可以传入一个迭代器
     }
+
+    if(user.getId()!=-1){
+        _redis.unsubscribe(user.getId());
+    }
     // 如果的到该用户的在线信息，更新数据库状态
     if (user.getId() != -1) {
         user.setState("offline");
@@ -234,6 +249,7 @@ void ChatService::oneChat(const TcpConnectionPtr &conn, json &js, Timestamp t) {
     // {"msgid":ONE_CHAT_MSG,"id":senderID,"name":senderName,"toid":reveiverID,"msg":"xxx"}
     LOG_INFO << "one chat service";
     // 只要知道对方的id就可以通信
+    // 单机下所有客户在同一台服务器，集群下需要再查数据库
     int toid = js["toid"].get<int>();
     // 如果用户在线，直接发送；不然存入offlinemessage表
     {
@@ -245,6 +261,14 @@ void ChatService::oneChat(const TcpConnectionPtr &conn, json &js, Timestamp t) {
             return;
         }
     }
+
+    // 新增：实现集群服务器之间的通信，
+    // 先查询该用户在不在别的服务器上
+    User user=_userModel.query(toid);
+    if(user.getState()=="online"){
+        _redis.publish(toid,js.dump());
+    }
+
     // 用户不在线，转存信息为offlinemessage；开发offlinemessageModel
     // 这是单机版的实现，一个服务器集群如何获取其他主机上的信息呢？
     _offlineMsgModel.insert(toid, js.dump());
@@ -307,9 +331,18 @@ void ChatService::groupChat(
             // 如果组员在线直接发送，消息
             it->second->send(js.dump());
         } else {
-            // 单机版本的实现，如果服务集群如何处理？
-            // 若用户在其他服务器在线？
-            _offlineMsgModel.insert(id, js.dump());
+            // // 单机版本的实现，如果服务集群如何处理？
+            // // 若用户在其他服务器在线？
+            // _offlineMsgModel.insert(id, js.dump());
+            // 1、查询toid是不是在其他服务器登录
+            User user=_userModel.query(id);
+            if(user.getState()=="online"){
+                // 向订阅该channel（也就是userid）的，发布信息
+                _redis.publish(id,js.dump());
+            }else{
+                // 用户不在线
+                _offlineMsgModel.insert(id,js.dump());
+            }
         }
     }
 }
@@ -317,25 +350,37 @@ void ChatService::groupChat(
 // 处理用户注销业务
 void ChatService::loginout(
     const TcpConnectionPtr &conn, json &js, Timestamp time) {
-int userid = js["id"].get<int>();
+    int userid = js["id"].get<int>();
 
     {
         lock_guard<mutex> lock(_connMutex);
         auto it = _userConnMap.find(userid);
-        if (it != _userConnMap.end())
-        {
-            _userConnMap.erase(it);
-        }
-        auto itcon=_userConnMapReverse.find(conn);
-        if(itcon!=_userConnMapReverse.end()){
+        if (it != _userConnMap.end()) { _userConnMap.erase(it); }
+        auto itcon = _userConnMapReverse.find(conn);
+        if (itcon != _userConnMapReverse.end()) {
             _userConnMapReverse.erase(itcon);
         }
     }
 
     // // 用户注销，相当于就是下线，在redis中取消订阅通道
-    // _redis.unsubscribe(userid); 
+    _redis.unsubscribe(userid);
 
     // 更新用户的状态信息
     User user(userid, "", "", "offline");
     _userModel.updateState(user);
+}
+
+// 对redis所接收到的订阅信息进行业务处理，并注册消息处理函数
+// 我们使用userid作为channel，
+// 从所订阅的回复消息里面可以得知channelname==》userid，message
+void ChatService::handleRedisSubscribeMessage(int userid, string msg) {
+    lock_guard<mutex> lock(_connMutex);
+    auto it = _userConnMap.find(userid);
+    if (it != _userConnMap.end()) {
+        it->second->send(msg);
+        return;
+    }
+
+    // 存储该用户的离线消息
+    _offlineMsgModel.insert(userid, msg);
 }

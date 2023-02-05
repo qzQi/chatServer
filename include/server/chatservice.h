@@ -19,6 +19,8 @@ ChatService编写为一个单例，仅仅为了使用成员函数处理业务，
 #include "friendModel.hpp"
 #include "groupmodel.hpp"
 
+#include "redis.hpp"
+
 using namespace std;
 using namespace muduo;
 using namespace muduo::net;
@@ -66,6 +68,9 @@ class ChatService {
     // 服务器异常，业务重置方法，不用每次手动更新数据库了
     void reset();
 
+    // 对redis所接收到的订阅信息进行业务处理，并注册消息处理函数
+    void handleRedisSubscribeMessage(int,string);
+
   private:
     ChatService(); // 单例实现
     unordered_map<int, MsgHandler>
@@ -85,6 +90,9 @@ class ChatService {
     unordered_map<TcpConnectionPtr, int> _userConnMapReverse;
     // 定义互斥锁，保证_userConnMap的线程安全
     mutex _connMutex;
+
+    // redis客户端对象
+    Redis _redis;
 };
 
 #endif
