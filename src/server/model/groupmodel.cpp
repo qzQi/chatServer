@@ -109,3 +109,29 @@ vector<int> GroupModel::queryGroupUsers(int userid, int groupid) {
     }
     return idVec;
 }
+
+vector<int> GroupModel::queryOfflineUsers(int groupid) {
+    vector<int> users;
+    // 需要将user表和groupuser表进行联合查询
+    // select * from groupuser
+    // inner join user on groupuser.userid=user.id
+    // where groupid=1 and state="offline";
+    char sql[1024] = {0};
+    sprintf(
+        sql, "select userid from groupuser \
+        inner join user on groupuser.userid=user.id \
+        where groupid = %d and state= %s",
+        groupid, "offline");
+
+    MySQL conn;
+    if(conn.connect()){
+        MYSQL_RES* res=conn.query(sql);
+        if(res!=nullptr){
+            MYSQL_ROW row;
+            while((row=mysql_fetch_row(res))!=nullptr){
+                users.push_back(atoi(row[0]));
+            }
+        }
+    }
+    return users;
+}

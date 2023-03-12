@@ -69,7 +69,7 @@ class ChatService {
     void reset();
 
     // 对redis所接收到的订阅信息进行业务处理，并注册消息处理函数
-    void handleRedisSubscribeMessage(int,string);
+    void handleRedisSubscribeMessage(string,string);
 
   private:
     ChatService(); // 单例实现

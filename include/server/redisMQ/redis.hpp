@@ -21,20 +21,20 @@ class Redis {
     bool connect();
 
     // 向指定的channel发送msg
-    bool publish(int channel, string message);
+    bool publish(const string& channel, string message);
 
     // 向redis指定的通道subscribe订阅消息
-    bool subscribe(int channel);
+    bool subscribe(const string& channel);
 
     // 用户下线时进行unsubscribe，取消订阅channel的信息，释放server为channel分配的缓冲
-    bool unsubscribe(int channel);
+    bool unsubscribe(const string& channel);
 
     // 在独立的线程中接受订阅channel（userid）所发布的消息，
     // 并转发给message handler处理函数
     void receive_channel_message();
 
     // 由service进行该注册。
-    void init_notify_message_handler(function<void(int, string)>);
+    void init_notify_message_handler(function<void(string, string)>);
 
   private:
   // 一个redisContext相当于我们的一个redis-cli，一个cli可以订阅很多channel
@@ -43,6 +43,6 @@ class Redis {
 
     // 回调操作，收到订阅消息后由service层处理业务。
     // 如何处理由service决定。   我们知道subscribe之后收到的数据包括三行
-    function<void(int, string)> _notify_message_handler;
+    function<void(string, string)> _notify_message_handler;
 };
 #endif

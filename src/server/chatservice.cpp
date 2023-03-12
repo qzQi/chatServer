@@ -26,6 +26,8 @@ MsgHandler ChatService::getHandler(int msgid) {
 }
 
 // 用户登录业务代码，必然伴随着数据库的查询，如何将数据层与业务实现分离？
+// 新增：订阅组群实现一个群消息的广播实现，需要修改usermoder==》返回用户所在的所有group，这个已实现
+// 修改groupmodel实现查找出所有的不在线组员
 void ChatService::login(const TcpConnectionPtr &conn, json &js, Timestamp t) {
     LOG_INFO << "login service !"; // for debug
     /*
@@ -54,8 +56,8 @@ void ChatService::login(const TcpConnectionPtr &conn, json &js, Timestamp t) {
                 _userConnMapReverse.insert({conn, id}); // from O(n)-->O(1)
             }
 
-            // 
-            _redis.subscribe(id);
+            // 订阅自己的channel，在实现跨服务器的单聊时候很方便
+            _redis.subscribe(to_string(id));
 
             // 登录成功，返回成功信息，并更新数据库状态online
             //  UserModel新增update功能
@@ -95,6 +97,7 @@ void ChatService::login(const TcpConnectionPtr &conn, json &js, Timestamp t) {
             }
 
             // 供客户端登录时候显示的信息：用户组群信息
+            // 新增：用户登录之后订阅自己的所有的组群！用于实现在线用户之间的广播
             vector<Group> groupuserVec = _groupModel.queryGroups(id);
             if (!groupuserVec.empty()) {
                 // 每个组的id，name，desc，所有用户
@@ -103,6 +106,11 @@ void ChatService::login(const TcpConnectionPtr &conn, json &js, Timestamp t) {
                 for (Group &group : groupuserVec) {
                     json grpjson;
                     grpjson["id"] = group.getId();
+                    // 订阅用户所在的所有组群，用于实现群聊的在线用户广播实现！
+                    // 但是如何区分用户id与组id？改一下订阅的内容！
+                    // 组群的订阅都加上group前缀
+                    _redis.subscribe("group"+to_string(group.getId()));
+
                     grpjson["groupname"] = group.getName();
                     grpjson["groupdesc"] = group.getDesc();
                     vector<string> userV;
@@ -234,7 +242,7 @@ void ChatService::clientCloseException(const TcpConnectionPtr &conn) {
     }
 
     if(user.getId()!=-1){
-        _redis.unsubscribe(user.getId());
+        _redis.unsubscribe(to_string(user.getId()));
     }
     // 如果的到该用户的在线信息，更新数据库状态
     if (user.getId() != -1) {
@@ -269,7 +277,7 @@ void ChatService::oneChat(const TcpConnectionPtr &conn, json &js, Timestamp t) {
     // TODO：可新增缓存功能，使用redis来查看是否在线来减少mysql的压力
     if(user.getState()=="online"){
         // bug1：进行oneChat业务时，跨服务器通信，导致对方down了，自己没事
-        _redis.publish(toid,js.dump());
+        _redis.publish(to_string(toid),js.dump());
         return ;
     }
 
@@ -326,33 +334,54 @@ void ChatService::addGroup(
 // select * from groupuser  
 // inner join user on groupuser.userid=user.id 
 // where groupid=1 and state="offline";
-void ChatService::groupChat(
-    const TcpConnectionPtr &conn, json &js, Timestamp t) {
-    // 实现：从数据库获取user所要发送组群的所有用户id
-    int userid = js["id"];
-    int groupid = js["groupid"];
-    vector<int> uidVec = _groupModel.queryGroupUsers(userid, groupid);
+// void ChatService::groupChat(
+//     const TcpConnectionPtr &conn, json &js, Timestamp t) {
+//     // 实现：从数据库获取user所要发送组群的所有用户id
+//     int userid = js["id"];
+//     int groupid = js["groupid"];
+//     vector<int> uidVec = _groupModel.queryGroupUsers(userid, groupid);
 
-    lock_guard<mutex> lk(_connMutex);
-    for (int id : uidVec) {
-        auto it = _userConnMap.find(id);
-        if (it != _userConnMap.end()) {
-            // 如果组员在线直接发送，消息
-            it->second->send(js.dump());
-        } else {
-            // // 单机版本的实现，如果服务集群如何处理？
-            // // 若用户在其他服务器在线？
-            // _offlineMsgModel.insert(id, js.dump());
-            // 1、查询toid是不是在其他服务器登录
-            User user=_userModel.query(id);
-            if(user.getState()=="online"){
-                // 向订阅该channel（也就是userid）的，发布信息
-                _redis.publish(id,js.dump());
-            }else{
-                // 用户不在线
-                _offlineMsgModel.insert(id,js.dump());
-            }
-        }
+//     lock_guard<mutex> lk(_connMutex);
+//     for (int id : uidVec) {
+//         auto it = _userConnMap.find(id);
+//         if (it != _userConnMap.end()) {
+//             // 如果组员在线直接发送，消息
+//             it->second->send(js.dump());
+//         } else {
+//             // // 单机版本的实现，如果服务集群如何处理？
+//             // // 若用户在其他服务器在线？
+//             // _offlineMsgModel.insert(id, js.dump());
+//             // 1、查询toid是不是在其他服务器登录
+//             User user=_userModel.query(id);
+//             if(user.getState()=="online"){
+//                 // 向订阅该channel（也就是userid）的，发布信息
+//                 _redis.publish(to_string(id),js.dump());
+//             }else{
+//                 // 用户不在线
+//                 _offlineMsgModel.insert(id,js.dump());
+//             }
+//         }
+//     }
+// }
+
+// 直接修改组群聊天的实现：
+// 1、在线用户必然已经订阅了 eg：”group0001“  
+// 2：进行一次数据库连接查询找出本组群所有不在线的用户，然后存储一下离线消息
+// 组群业务的协议格式：知道那个用户 userid，在哪个群组里面群聊groupid
+void ChatService::groupChat(
+    const TcpConnectionPtr &conn, json &js, Timestamp t){
+    int userid=js["id"];
+    int groupid=js["groupid"];
+
+    // 向在线组群在线用户广播
+    _redis.publish("group"+to_string(groupid),js.dump());
+
+    // 进行一次联合查询，查找groupid下的所有不在线用户！需要修改groupmodel，添加方法！
+    vector<int> offlineUsers=_groupModel.queryOfflineUsers(groupid);
+    // 但是不管怎么搞，业务上中有一些瑕疵，比如在添加离线消息时候用户上线了？
+    // 这个情况很有必要用上缓存！快速的判断一个用户是否在线！
+    for(int i:offlineUsers){
+        _offlineMsgModel.insert(i,js.dump());
     }
 }
 
@@ -372,7 +401,7 @@ void ChatService::loginout(
     }
 
     // // 用户注销，相当于就是下线，在redis中取消订阅通道
-    _redis.unsubscribe(userid);
+    _redis.unsubscribe(to_string(userid));
 
     // 更新用户的状态信息
     User user(userid, "", "", "offline");
@@ -382,14 +411,14 @@ void ChatService::loginout(
 // 对redis所接收到的订阅信息进行业务处理，并注册消息处理函数
 // 我们使用userid作为channel，
 // 从所订阅的回复消息里面可以得知channelname==》userid，message
-void ChatService::handleRedisSubscribeMessage(int userid, string msg) {
+void ChatService::handleRedisSubscribeMessage(string userid, string msg) {
     lock_guard<mutex> lock(_connMutex);
-    auto it = _userConnMap.find(userid);
+    auto it = _userConnMap.find(atoi(userid.c_str()));
     if (it != _userConnMap.end()) {
         it->second->send(msg);
         return;
     }
 
     // 存储该用户的离线消息
-    _offlineMsgModel.insert(userid, msg);
+    _offlineMsgModel.insert(atoi(userid.c_str()), msg);
 }

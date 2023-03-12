@@ -38,13 +38,13 @@ bool Redis::connect() {
 
 // 向redis指定的通道subscribe订阅消息,redis-cli是阻塞在接受channel信息上面
 // 这里我们使用专门的线程进行receive
-bool Redis::subscribe(int channel) {
+bool Redis::subscribe(const string& channel) {
     // SUBSCRIBE命令本身会造成线程阻塞等待通道里面发生消息，这里只做订阅通道，不接收通道消息
     // 通道消息的接收专门在receive_channel_message函数中的独立线程中进行
     // 只负责发送命令，不阻塞接收redis
     // server响应消息，否则和notifyMsg线程抢占响应资源
     if (REDIS_ERR
-        == redisAppendCommand(_subscribe_context, "subscribe %d", channel)) {
+        == redisAppendCommand(_subscribe_context, "subscribe %s", channel.c_str())) {
         LOG_ERROR << "subscribe failed! ";
         return false;
     }
@@ -63,9 +63,9 @@ bool Redis::subscribe(int channel) {
 }
 
 // 向指定的channel发送msg
-bool Redis::publish(int channel, string message) {
+bool Redis::publish(const string& channel, string message) {
     redisReply *reply = (redisReply *)redisCommand(
-        _publish_context, "PUBLISH %d %s", channel, message.c_str());
+        _publish_context, "PUBLISH %s %s", channel.c_str(), message.c_str());
     if (nullptr == reply) {
         LOG_ERROR << "publish command failed!";
         return false;
@@ -77,8 +77,8 @@ bool Redis::publish(int channel, string message) {
 
 // 用户下线时进行unsubscribe，取消订阅channel的信息，释放server为channel分配的缓冲
 // 在cli里面就不能实现这个，因为cli一直阻塞在接收
-bool Redis::unsubscribe(int channel) {
-    if (redisAppendCommand(_subscribe_context, "unsubscribe %d", channel)
+bool Redis::unsubscribe(const string& channel) {
+    if (redisAppendCommand(_subscribe_context, "unsubscribe %s", channel.c_str())
         == REDIS_ERR) {
         LOG_ERROR << "unsubscribe command failed!";
         return false;
@@ -108,7 +108,7 @@ void Redis::receive_channel_message() {
             LOG_INFO << "给业务层上报通道上发生的消息 " << reply->element[1]->str
                      << reply->element[2]->str;
             _notify_message_handler(
-                atoi(reply->element[1]->str), reply->element[2]->str);
+                reply->element[1]->str, reply->element[2]->str);
         }
 
         freeReplyObject(reply);
@@ -116,7 +116,7 @@ void Redis::receive_channel_message() {
 }
 
 // 由service进行该注册。service进行注册该回调
-void Redis::init_notify_message_handler(function<void(int, string)> f) {
+void Redis::init_notify_message_handler(function<void(string, string)> f) {
     // 这里不应该有bug啊，绑定的不应该是是一个空的啊
     _notify_message_handler = f;
 }
