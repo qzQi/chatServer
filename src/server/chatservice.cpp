@@ -381,6 +381,7 @@ void ChatService::groupChat(
     // 但是不管怎么搞，业务上中有一些瑕疵，比如在添加离线消息时候用户上线了？
     // 这个情况很有必要用上缓存！快速的判断一个用户是否在线！
     for(int i:offlineUsers){
+        // 使用redis判断用户i是否在线！在线的话直接onchat，不在的话存数据库
         _offlineMsgModel.insert(i,js.dump());
     }
 }
