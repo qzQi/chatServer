@@ -266,6 +266,7 @@ void ChatService::oneChat(const TcpConnectionPtr &conn, json &js, Timestamp t) {
     // 新增：实现集群服务器之间的通信，
     // 先查询该用户在不在别的服务器上
     User user=_userModel.query(toid);
+    // TODO：可新增缓存功能，使用redis来查看是否在线来减少mysql的压力
     if(user.getState()=="online"){
         // bug1：进行oneChat业务时，跨服务器通信，导致对方down了，自己没事
         _redis.publish(toid,js.dump());
@@ -282,7 +283,7 @@ void ChatService::oneChat(const TcpConnectionPtr &conn, json &js, Timestamp t) {
 void ChatService::reset() {
     _userModel.resetState();
 }
-
+ 
 // 添加好友业务，
 void ChatService::addFriend(
     const TcpConnectionPtr &conn, json &js, Timestamp t) {
@@ -320,6 +321,11 @@ void ChatService::addGroup(
 }
 
 // 群聊业务,群发信息：对方在线？直接发送，不在线存储离线
+// 这一块的业务实现效率太低了，如果能够实现一个类似于广播的东西就好了
+// 可以直接给在线的人使用消息队列广播，然后再查数据库看看哪些不在线的再存储离线消息！
+// select * from groupuser  
+// inner join user on groupuser.userid=user.id 
+// where groupid=1 and state="offline";
 void ChatService::groupChat(
     const TcpConnectionPtr &conn, json &js, Timestamp t) {
     // 实现：从数据库获取user所要发送组群的所有用户id
