@@ -326,6 +326,7 @@ void ChatService::addGroup(
 // select * from groupuser  
 // inner join user on groupuser.userid=user.id 
 // where groupid=1 and state="offline";
+// final：基于发布订阅的广播实现不可行，还是直接查数据库：找出在线&&不在线，而不是一个一个查！
 void ChatService::groupChat(
     const TcpConnectionPtr &conn, json &js, Timestamp t) {
     // 实现：从数据库获取user所要发送组群的所有用户id

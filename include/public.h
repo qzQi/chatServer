@@ -21,7 +21,7 @@ enum EnMsgType {
 
 // 各个业务数据格式
 /*
-1: {"msgid":1,"id":userid,"password":"pwd"};
+1: "{"msgid":1,"id":1000,"password":"123456"}";
 2: {"msgid":2,"errno":0/2,}
 3: {"msgid":3,”name":"uname","password":"pwd"}注册消息
 
